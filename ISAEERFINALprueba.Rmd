@@ -1,0 +1,139 @@
+---
+title: "ISAEER"
+output: 
+  flexdashboard::flex_dashboard:
+    theme:
+      bg: "#101010"
+      fg: "#FDF7F7" 
+      primary: "#28A745"
+      base_font:
+        google: Prompt
+      code_font:
+        google: JetBrains Mono
+    orientation: columns
+    vertical_layout: fill
+    runtime: shiny
+---
+
+::: {style="text-align: left; margin-top: 5px;"}
+<a href="https://www.entrerios.gov.ar/dgec/isaeer/" target="_blank" class="btn btn-primary" style="margin-left: 5px;"> Leer Informe </a>
+:::
+::: {style="text-align:left; margin-top: 22px;"}
+<a href="https://www.entrerios.gov.ar/dgec/" target="_blank" class="btn btn-primary" style="padding: 2px; border-radius: 5px;"> <img src="Imagenes/dec.GIF" style="height: 40px; vertical-align: middle; margin-right: 5px;"/> </a>
+:::
+
+::: {style="text-align:left; margin-top: 20px;"}
+<a href="https://www.ceer.org/" target="_blank" class="btn btn-primary" style="padding: 2px; border-radius: 5px;"> <img src="Imagenes/Ceer.gif" style="height: 40px; vertical-align: middle; margin-right: 5px;"/> </a>
+:::
+
+::: {style="text-align:left; margin-top: 18px;"}
+<a href="https://https://www.fceco.uner.edu.ar/" target="_blank" class="btn btn-primary" style="padding: 2px; border-radius: 5px;"> <img src="Imagenes/logo fceco.GIF" style="height: 40px; vertical-align: middle; margin-right: 5px;"/> </a>
+:::
+
+```{r setup, include=FALSE}
+library(googledrive)
+library(flexdashboard)
+library(tidyverse)
+library(plotly)
+library(googlesheets4)
+library(zoo)
+library(mFilter)
+library(readxl)
+library(shiny)
+library(plotly)
+library(dplyr)
+
+```
+
+# Introducción
+
+El Indicador Sintético de Actividad Económica de la provincia de Entre Ríos -ISAEER- permite describir la coyuntura económica provincial y su evolución trimestral a través del análisis conjunto de algunas de las principales variables económicas de Entre Ríos. Este indicador es producto del trabajo colaborativo entre la Dirección General de Estadística y Censos de la provincia de Entre Ríos, la Facultad de Ciencias Económicas de la Universidad Nacional de Entre Ríos y el Consejo Empresario de Entre Ríos.
+
+# Metodología
+
+Para estimar el ISAEER se aplica la metodología desarrollada por Stock y Watson. El procedimiento postula un modelo probabilístico de espacio - estado que es utilizado para predecir un proceso latente y estimar así un indicador agregado coincidente de la actividad económica provincial. Se fundamenta en la hipótesis de que los comovimientos observados en las series indicadoras son capturados por una única variable no observable, común a todas ellas, denominada el estado de la economía.
+
+Se plantearon varios modelos y la estimación máximo verosímil de los parámetros del modelo se logra representando el sistema en la forma de un modelo espacio - estado y aplicando el filtro de Kalman.
+
+En la provincia de Entre Ríos se consideraron 10 series económicas coincidentes para incluir en el cálculo del ISAEER, de las cuales 8 conforman el actual Indicador (consumo de combustibles, consumo de energía eléctrica, consumo de gas, patentamiento, recaudación de ingresos brutos, faena de aves, molienda y empleo) mientras que los 2 restantes (ventas en supermercado y consumo de cemento) fueron excluidas modelo.
+
+El año base del indicador seleccionado es el 2006.
+
+Se analiza también si el indicador agregado coincidente estimado mediante el modelo que se selecciona es consistente con la evolución económica de la provincia en el período considerado.
+
+# ISAEER
+
+```{r}
+# Cargar el data frame
+dt <- read_excel(path = "C:/Users/german/Desktop/Curso R/ISAEER/Data/baseISAEER1.xlsx", 
+                 sheet = "ISAEER",
+                 col_names = TRUE)
+df <- dt
+df$Mes <- as.Date(df$Mes)
+# UI de la aplicación
+ui <- fluidPage(
+  titlePanel("Índice Sintético de Actividad Económica de Entre Ríos"),
+  
+  sidebarLayout(
+    sidebarPanel(
+      selectInput("serie", "Seleccione la serie de tiempo:",
+                  choices = colnames(df)[-1]), 
+      sliderInput("slider", "Seleccione el rango de meses:",
+                  min = min(df$Mes), max = max(df$Mes),
+                  value = c(min(df$Mes), max(df$Mes)),
+                  timeFormat = "%Y-%m", step = 30)
+    ),
+    mainPanel(
+      plotlyOutput("plot", width = "100%", height = "500px"),
+      # Variaciones debajo del gráfico
+      h4(""),
+      div(style = "margin-top: 10px;",
+          h5("Variación interanual:"),
+          textOutput("var_interanual"))
+     # Servidor para la aplicación
+server <- function(input, output) {
+  # Filtrar datos según el rango seleccionado
+  df_filtered <- reactive({
+    df %>%
+      filter(Mes >= input$slider[1] & Mes <= input$slider[2])
+  })
+  
+  # Variación interanual
+  output$var_interanual <- renderText({
+    serie_seleccionada <- input$serie
+    mes_actual <- max(df$Mes)
+    mes_anterior <- mes_actual %m-% years(1)
+    
+    valor_actual <- df %>% filter(Mes == mes_actual) %>% pull(serie_seleccionada)
+    valor_anterior <- df %>% filter(Mes == mes_anterior) %>% pull(serie_seleccionada)
+    
+    if (!is.na(valor_actual) && !is.na(valor_anterior) && valor_anterior != 0) {
+      porcentaje <- round(((valor_actual - valor_anterior) / valor_anterior) * 100, 2)
+      paste0(porcentaje, "%")
+    } else {
+      "Datos insuficientes para calcular"
+    }
+  })
+  
+  # Renderizar el gráfico
+  output$plot <- renderPlotly({
+    df_plot <- df_filtered()
+    serie_seleccionada <- input$serie
+    
+    plot_ly(df_plot, x = ~Mes, y = as.formula(paste("~", serie_seleccionada)),
+            type = "scatter", mode = "lines", name = serie_seleccionada, line = list(color = "green")) %>%
+      layout(
+        title = paste("Serie de Tiempo: ", serie_seleccionada),
+        xaxis = list(title = "Mes"),
+        yaxis = list(title = serie_seleccionada)
+      )
+  })
+}
+
+shinyApp(ui, server)
+```
+ 
+
+
+
+
